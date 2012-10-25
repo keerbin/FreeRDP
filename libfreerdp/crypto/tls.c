@@ -289,10 +289,10 @@ BOOL tls_disconnect(rdpTls* tls)
 int tls_read(rdpTls* tls, BYTE* data, int length)
 {
 	int status;
-
+	int ret;
 	status = SSL_read(tls->ssl, data, length);
-
-	switch (SSL_get_error(tls->ssl, status))
+	ret = SSL_get_error(tls->ssl, status);
+	switch (ret)
 	{
 		case SSL_ERROR_NONE:
 			break;
@@ -303,6 +303,7 @@ int tls_read(rdpTls* tls, BYTE* data, int length)
 			break;
 
 		default:
+			printf("ssl read error:%d\n", ret);
 			tls_print_error("SSL_read", tls->ssl, status);
 			status = -1;
 			break;

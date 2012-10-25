@@ -25,6 +25,7 @@
 #include <wctype.h>
 
 #include <winpr/crt.h>
+#include <assert.h>
 
 /* String Manipulation (CRT): http://msdn.microsoft.com/en-us/library/f0151s4x.aspx */
 
@@ -304,6 +305,67 @@ BOOL IsCharLowerW(WCHAR ch)
 	return 0;
 }
 
+static BOOL getNextWchar(unsigned int* wc, char** pin, size_t* ibl)
+{
+	if (*ibl < 1)
+	{
+		return FALSE;
+	}
+	*wc = (unsigned int) (unsigned char) (*(*pin)++);
+	*ibl -= 1;
+
+	if (*wc >= 0xF0) {
+		if (*ibl < 3)
+		{
+			return FALSE;
+		}
+		*wc = (*wc - 0xF0) << 18;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80) << 12;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80) << 6;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80);
+		*ibl -= 3;
+	} else if (*wc >= 0xE0) {
+		if (*ibl < 2)
+		{
+			return FALSE;
+		}
+		*wc = (*wc - 0xE0) << 12;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80) << 6;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80);
+		*ibl -= 2;
+	} else if (*wc >= 0xC0) {
+		if (*ibl < 1)
+		{
+			return FALSE;
+		}
+		*wc = (*wc - 0xC0) << 6;
+		*wc += ((unsigned int) (unsigned char) (*(*pin)++) - 0x80);
+		*ibl -= 1;
+	}
+
+	return TRUE;
+}
+
+/**
+ * return number of widechar
+ */
+static size_t CalMultiByteToWideCharLen(size_t ibl, char *pin)
+{
+	size_t obl = 0;
+	unsigned int wc;
+	while (ibl >= 1) {
+		if (!getNextWchar(&wc, &pin, &ibl)) {
+			break;
+		}
+		if (wc <= 0xFFFF) {
+			obl += 1;
+		} else {
+			obl += 2;
+		}
+	}
+	return ibl==0?obl:0;
+}
+
 /*
  * Advanced String Techniques in C++ - Part I: Unicode
  * http://www.flipcode.com/archives/Advanced_String_Techniques_in_C-Part_I_Unicode.shtml
@@ -318,11 +380,11 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr,
 		int cbMultiByte, LPWSTR lpWideCharStr, int cchWideChar)
 {
 	size_t ibl;
-	size_t obl;
+	size_t obl = cchWideChar;
 	char* pin;
 	char* pout;
 	char* pout0;
-
+	unsigned int wc;
 	if (lpMultiByteStr == NULL)
 		return 0;
 
@@ -330,14 +392,15 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr,
 		cbMultiByte = strlen(lpMultiByteStr) + 1;
 
 	ibl = cbMultiByte;
-	obl = 2 * ibl;
-
-	if (cchWideChar < 1)
-		return (obl / 2);
 
 	pin = (char*) lpMultiByteStr;
 	pout0 = (char*) lpWideCharStr;
 	pout = pout0;
+
+	if (cchWideChar == 0)
+	{
+		return CalMultiByteToWideCharLen(ibl, pin);
+	}
 
 #ifdef HAVE_ICONV
 	{
@@ -360,49 +423,32 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr,
 		iconv_close(out_iconv_h);
 	}
 #else
-	while ((ibl > 0) && (obl > 0))
+	while (ibl >= 1)
 	{
-		unsigned int wc;
-
-		wc = (unsigned int) (unsigned char) (*pin++);
-		ibl--;
-
-		if (wc >= 0xF0)
+		if (!getNextWchar(&wc, &pin, &ibl))
 		{
-			wc = (wc - 0xF0) << 18;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80) << 12;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80) << 6;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80);
-			ibl -= 3;
-		}
-		else if (wc >= 0xE0)
-		{
-			wc = (wc - 0xE0) << 12;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80) << 6;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80);
-			ibl -= 2;
-		}
-		else if (wc >= 0xC0)
-		{
-			wc = (wc - 0xC0) << 6;
-			wc += ((unsigned int) (unsigned char) (*pin++) - 0x80);
-			ibl -= 1;
+			break;
 		}
 
-		if (wc <= 0xFFFF)
+		if (wc <= 0xFFFF && (obl-= 2) >= 0)
 		{
 			*pout++ = (char) (wc & 0xFF);
 			*pout++ = (char) (wc >> 8);
-			obl -= 2;
 		}
-		else
+		else if ((obl -= 4) >= 0)
 		{
 			wc -= 0x10000;
 			*pout++ = (char) ((wc >> 10) & 0xFF);
 			*pout++ = (char) ((wc >> 18) + 0xD8);
 			*pout++ = (char) (wc & 0xFF);
 			*pout++ = (char) (((wc >> 8) & 0x03) + 0xDC);
-			obl -= 4;
+		}
+		else
+		{
+			//error no enough, but ibl maybe zero, set 1
+			ibl = 1;
+			printf("%s no enough space \n", __FUNCTION__);
+			break;
 		}
 	}
 #endif
