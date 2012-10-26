@@ -430,12 +430,12 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr,
 			break;
 		}
 
-		if (wc <= 0xFFFF && (obl-= 2) >= 0)
+		if (wc <= 0xFFFF && (obl-= 1) >= 0)
 		{
 			*pout++ = (char) (wc & 0xFF);
 			*pout++ = (char) (wc >> 8);
 		}
-		else if ((obl -= 4) >= 0)
+		else if ((obl -= 2) >= 0)
 		{
 			wc -= 0x10000;
 			*pout++ = (char) ((wc >> 10) & 0xFF);
@@ -446,9 +446,8 @@ int MultiByteToWideChar(UINT CodePage, DWORD dwFlags, LPCSTR lpMultiByteStr,
 		else
 		{
 			//error no enough, but ibl maybe zero, set 1
-			ibl = 1;
 			printf("%s no enough space \n", __FUNCTION__);
-			break;
+			return 0;
 		}
 	}
 #endif
